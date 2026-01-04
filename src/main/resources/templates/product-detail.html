@@ -1,0 +1,169 @@
+<!DOCTYPE html>
+<html xmlns:th="http://www.thymeleaf.org">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title th:text="${product.name} + ' - Price Tracker'">Product Detail</title>
+    <link rel="stylesheet" th:href="@{/css/style.css}">
+    <script src="https://cdn.jsdelivr.net/npm/chart.js"></script>
+    <script th:src="@{/js/notifications.js}"></script>
+</head>
+<body>
+    <div class="container">
+        <header>
+            <a href="/" class="back-link">← Back to Products</a>
+            <h1 th:text="${product.name}">Product Name</h1>
+        </header>
+
+        <div class="product-detail">
+            <div class="detail-card">
+                <div class="detail-header">
+                    <h2>Product Information</h2>
+                    <span class="status-badge" th:classappend="${product.isActive} ? 'active' : 'inactive'"
+                          th:text="${product.isActive} ? 'Active' : 'Inactive'">Active</span>
+                </div>
+                <div class="detail-content">
+                    <p><strong>URL:</strong> <a th:href="${product.url}" target="_blank" th:text="${product.url}">URL</a></p>
+                    <p th:if="${product.description}"><strong>Description:</strong> <span th:text="${product.description}">Description</span></p>
+                    <p><strong>Current Price:</strong> <span class="current-price-large" th:text="'₹' + ${#numbers.formatDecimal(product.currentPrice, 1, 2)}">₹0.00</span></p>
+                    <p><strong>Target Price:</strong> <span class="target-price-large" th:text="'₹' + ${#numbers.formatDecimal(product.targetPrice, 1, 2)}">₹0.00</span></p>
+                    <p><strong>Last Checked:</strong> <span th:text="${#temporals.format(product.lastChecked, 'MMM dd, yyyy HH:mm')}">Never</span></p>
+                    <p><strong>Created:</strong> <span th:text="${#temporals.format(product.createdAt, 'MMM dd, yyyy HH:mm')}">Date</span></p>
+                </div>
+                <div class="detail-actions">
+                    <button class="btn btn-primary" onclick="checkPrice([[${product.id}]])">Check Price Now</button>
+                    <button class="btn btn-secondary" onclick="editProduct([[${product.id}]])">Edit Product</button>
+                    <button class="btn btn-danger" type="button" th:data-product-id="${product.id}" onclick="deleteProductById(this)">Delete Product</button>
+                </div>
+            </div>
+
+            <div class="price-chart-card">
+                <h2>Price History</h2>
+                <canvas id="priceChart"></canvas>
+            </div>
+
+            <div class="history-table-card">
+                <h2>Price History Table</h2>
+                <table class="history-table">
+                    <thead>
+                        <tr>
+                            <th>Date & Time</th>
+                            <th>Price</th>
+                            <th>Change</th>
+                        </tr>
+                    </thead>
+                    <tbody>
+                        <tr th:each="entry, iterStat : ${history}">
+                            <td th:text="${#temporals.format(entry.recordedAt, 'MMM dd, yyyy HH:mm')}">Date</td>
+                            <td th:text="'₹' + ${#numbers.formatDecimal(entry.price, 1, 2)}">₹0.00</td>
+                            <td th:if="${iterStat.index < history.size() - 1}">
+                                <span th:classappend="${entry.price > history[iterStat.index + 1].price} ? 'price-up' : 'price-down'"
+                                      th:text="${entry.price > history[iterStat.index + 1].price} ? 
+                                      ('+₹' + ${#numbers.formatDecimal(entry.price - history[iterStat.index + 1].price, 1, 2)}) : 
+                                      ('-₹' + ${#numbers.formatDecimal(history[iterStat.index + 1].price - entry.price, 1, 2)})">Change</span>
+                            </td>
+                            <td th:if="${iterStat.index == history.size() - 1}">-</td>
+                        </tr>
+                    </tbody>
+                </table>
+            </div>
+        </div>
+    </div>
+
+    <script>
+        const productId = [[${product.id}]];
+        const priceHistory = /*[[${history}]]*/ [];
+        
+        // Initialize chart
+        const ctx = document.getElementById('priceChart').getContext('2d');
+        const labels = [];
+        const prices = [];
+        
+        // Reverse history to show oldest to newest
+        const reversedHistory = [...priceHistory].reverse();
+        reversedHistory.forEach(entry => {
+            labels.push(new Date(entry.recordedAt).toLocaleString());
+            prices.push(entry.price);
+        });
+        
+        new Chart(ctx, {
+            type: 'line',
+            data: {
+                labels: labels,
+                datasets: [{
+                    label: 'Price (₹)',
+                    data: prices,
+                    borderColor: 'rgb(75, 192, 192)',
+                    backgroundColor: 'rgba(75, 192, 192, 0.2)',
+                    tension: 0.1
+                }]
+            },
+            options: {
+                responsive: true,
+                scales: {
+                    y: {
+                        beginAtZero: false
+                    }
+                }
+            }
+        });
+        
+        function checkPrice(id) {
+            fetch(`/api/products/${id}/check`, { method: 'POST' })
+                .then(response => response.text())
+                .then(data => {
+                    alert(data);
+                    location.reload();
+                })
+                .catch(error => {
+                    alert('Error checking price: ' + error);
+                });
+        }
+        
+        function deleteProductById(button) {
+            event.preventDefault();
+            event.stopPropagation();
+            
+            const productId = button.getAttribute('data-product-id');
+            if (!productId) {
+                alert('Error: Product ID not found');
+                return;
+            }
+            
+            if (confirm('Are you sure you want to delete this product?')) {
+                console.log('Deleting product with ID:', productId);
+                
+                fetch(`/api/products/${productId}`, {
+                    method: 'DELETE',
+                    headers: {
+                        'Content-Type': 'application/json'
+                    }
+                })
+                .then(response => {
+                    console.log('Delete response status:', response.status);
+                    if (response.ok) {
+                        alert('Product deleted successfully');
+                        window.location.href = '/';
+                    } else {
+                        return response.text().then(text => {
+                            console.error('Delete failed:', text);
+                            throw new Error(text || 'Failed to delete product');
+                        });
+                    }
+                })
+                .catch(error => {
+                    console.error('Delete error:', error);
+                    alert('Error deleting product: ' + error.message);
+                });
+            }
+        }
+        
+        function editProduct(id) {
+            // Simple edit - redirect to edit page or show modal
+            alert('Edit functionality - implement as needed');
+        }
+    </script>
+    <script th:src="@{/js/app.js}"></script>
+</body>
+</html>
+
